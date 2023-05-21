@@ -1,0 +1,1444 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE nta PUBLIC '-//Uppaal Team//DTD Flat System 1.6//EN' 'http://www.it.uu.se/research/group/darts/uppaal/flat-1_6.dtd'>
+<nta>
+	<declaration>// Place global declarations here.
+broadcast chan train_end, control_end;
+broadcast chan go;
+
+clock y;
+
+const int num_l_trains = 1;
+const int num_r_trains = 1;
+const int num_of_points = 6;
+const int num_of_sections = 17;
+const int num_of_signals = 10;
+const int num_of_conf = 16;
+
+typedef int [0, num_l_trains-1] l_train_id;
+typedef int [0, num_r_trains-1] r_train_id;
+
+broadcast chan move_l_train[num_l_trains];
+broadcast chan move_r_train[num_r_trains];
+
+// Array of flags indicating if configuration was changed during turn
+// For two trains only two signals will be relevant at time
+bool l_sig_was_conf[num_l_trains] = {false};
+bool r_sig_was_conf[num_r_trains] = {false};
+// For two trains, only four points are relevant
+bool lp_was_conf[num_l_trains] = {false};
+bool rp_was_conf[num_r_trains] = {false};
+
+bool can_configure = true;
+
+bool can_move_l_train[num_l_trains] = {false};
+bool can_move_r_train[num_r_trains] = {false};
+
+bool all_waiting = true;
+
+// Array with Id of each section,
+// id 200 means 20m, id 201 means 20p and so on
+int section_IDs[num_of_sections] = {10,11,12,13,14,201,200,20,21,22,221,220,30,31,32,33,34};
+
+// Initial postitions of trains
+int pos_l_trains[num_l_trains] = {10};
+int pos_r_trains[num_r_trains] = {14};
+int trains_l_dest[num_l_trains] = {14};
+int trains_r_dest[num_r_trains] = {10};
+
+// false -&gt; red -&gt; train should be stopped
+// true  -&gt; green -&gt; train can move
+bool signal[num_of_signals] = {false, false, false, false, false, false, false, false, false, false};
+
+// Array with default configuration for points,
+// false means point is connected to lower section (shorter one),
+// ture means to upper section
+bool points[num_of_points] = {false, false, false, false, false, false};
+
+bool crash = false;
+bool success_l[num_l_trains] = {false};
+bool success_r[num_r_trains] = {false};
+bool win = false;
+
+// For trains initialization
+bool l_init[num_l_trains] = {false};
+bool r_init[num_r_trains] = {false};
+bool ready = false;
+
+int index = 0;
+
+void checkIfTrainsReady() {
+    ready = true;
+    index = 0;
+    while (index &lt; num_l_trains) {
+        if (!l_init[index])
+            ready = false;
+        index++;
+    }
+    index = 0;
+    while (index &lt; num_r_trains) {
+        if (!r_init[index])
+            ready = false;
+        index++;
+    }
+    index = 0;
+}
+
+void checkIfCrash(int train_id, int next_pos, bool dir) {
+    // dir = 1 means left to right
+    // dir = 0 means right to left	
+
+	// Check relevant configuration of points
+    // First check from left to righ going trains
+    if (dir) {
+
+        if (train_id == 0) {
+
+            if (next_pos == 20) {
+                 if (points[2] == false)
+                    crash = true;
+            }
+
+            if (next_pos == 13) {
+                // Check from where the train is approaching
+                // If it is section 12, point 13 should be connected to shorter end
+                if (pos_l_trains[train_id] == 12) {
+                    if (points[5])
+                        crash = true;
+                }
+                // Other possible direction is section 22p
+                // In this case, the point should be connected to longer end
+                else {
+                    if (points[5] == false)
+                        crash = true;
+                }
+            }
+            
+            if (next_pos == 33) {
+                if (points[4] == false)
+                    crash = true;
+            }
+        }
+        // Second train
+        if (train_id == 1) {
+            if (next_pos == 20) {
+                if (points[2])
+                    crash = true;
+            }
+            if (next_pos == 13) {
+                if (points[5] == false)
+                    crash = true;
+            }
+            // Same case as above
+            if (next_pos == 33) {
+                if (pos_l_trains[train_id] == 32) {
+                    if (points[4])
+                        crash = true;
+                }
+                else {
+                    if (points[4] == false)
+                        crash = true;
+                }
+            }
+        }
+    }
+    // Case for trains going right to left
+    else {
+        if (train_id == 0) {
+            if (next_pos == 11) {
+                if (pos_r_trains[0] == 12) {
+                    if (points[0])
+                        crash = true;
+                }
+                else {
+                    if (!points[0])
+                        crash = true;
+                }
+            }
+
+            if (next_pos == 22) {
+                if (points[3])
+                    crash = true;
+            }
+            
+            if (next_pos == 31) {
+                if (!points[1])
+                    crash = true;
+            }
+        }
+
+        if (train_id == 1) {
+            if (next_pos == 22)
+                if (!points[3])
+                    crash = true;
+
+            if (next_pos == 11)
+                if (!points[0])
+                    crash = true;
+
+            if (next_pos == 31) {
+                if (pos_r_trains[1] == 32)
+                    if (points[1])
+                        crash = true;
+                else
+                    if (!points[1])
+                        crash = true;
+            }
+        } 
+    }
+    
+	// Check if next section is free
+    // First, iterate over l trains
+	index = 0;
+	while (index &lt; num_l_trains) {
+        if (dir) {
+            if (index != train_id){
+			    if (pos_l_trains[index] == next_pos)
+				    crash = true;
+		    }    
+        }
+        else {
+            if (pos_l_trains[index] == next_pos)
+				    crash = true;
+        }
+		index++;
+	}
+	index = 0;
+
+    // Check the same way r trains
+    while (index &lt; num_r_trains) {
+        if (!dir) {
+            if (index != train_id) {
+                if (pos_r_trains[index] == next_pos)
+                    crash = true;
+            }
+        }
+        else {
+            if (pos_r_trains[index] == next_pos)
+                crash = true;
+        }
+        index++;
+    }
+    index = 0;
+}
+
+// Remember to extend this function later
+// It will be better to iterate over two arrays
+void checkIfSuccess() {
+    
+    index = 0;
+    while(index &lt; num_l_trains) {
+        if (pos_l_trains[index] == trains_l_dest[index])
+            success_l[index] = true;
+        index++;
+    }
+    
+    index = 0;
+    while(index &lt; num_r_trains) {
+        if (pos_r_trains[index] == trains_r_dest[index])
+            success_r[index] = true;
+        index++;
+    }
+
+	win = true;
+    index = 0;
+    while(index &lt; num_l_trains) {
+        if (success_l[index] != true)
+            win = false;
+        index++;
+    }    
+    index = 0;
+    while(index &lt; num_r_trains) {
+        if (success_r[index] != true)
+            win = false;
+        index++;
+    }    
+    index = 0;
+}
+
+// This function determines whether it is possible to move trains
+void canGo() {
+    all_waiting = true;
+
+    // Check l trains first
+    index = 0;
+    while (index &lt; num_l_trains) {
+        if (pos_l_trains[index] == 10) {
+            if (signal[0]) {
+                can_move_l_train[index] = true;
+                all_waiting = false;
+            }
+            else
+                can_move_l_train[index] = false;
+            }
+        if (pos_l_trains[index] == 12) {
+            if (signal[7]) {
+                can_move_l_train[index] = true;
+                all_waiting = false;
+            }
+            else
+                can_move_l_train[index] = false;
+        }
+        if (pos_l_trains[index] == 30) {
+            if (signal[1]) {
+                can_move_l_train[index] = true;
+                all_waiting = false;
+            }
+            else
+                can_move_l_train[index] = false;
+        }
+        if (pos_l_trains[index] == 32) {
+            if (signal[6]) {
+                can_move_l_train[index] = true;
+                all_waiting = false;
+            }
+            else
+                can_move_l_train[index] = false;
+        }
+        if (pos_l_trains[index] == 21) {
+            if (signal[5]) {
+                can_move_l_train[index] = true;
+                all_waiting = false;
+            }
+            else
+                can_move_l_train[index] = false;
+        }
+        index++;
+    }
+
+    index = 0;
+
+    // Check r trains
+    while (index &lt; num_r_trains) {
+        if (pos_r_trains[index] == 14) {
+            if (signal[9]) {
+                can_move_r_train[index] = true;
+                all_waiting = false;
+            }
+            else
+                can_move_r_train[index] = false;
+            }
+        if (pos_r_trains[index] == 12) {
+            if (signal[3]) {
+                can_move_r_train[index] = true;
+                all_waiting = false;
+            }
+            else
+                can_move_r_train[index] = false;
+        }
+        if (pos_r_trains[index] == 34) {
+            if (signal[8]) {
+                can_move_r_train[index] = true;
+                all_waiting = false;
+            }
+            else
+                can_move_r_train[index] = false;
+        }
+        if (pos_r_trains[index] == 32) {
+            if (signal[2]) {
+                can_move_r_train[index] = true;
+                all_waiting = false;
+            }
+            else
+                can_move_r_train[index] = false;
+        }
+        if (pos_r_trains[index] == 21) {
+            if (signal[4]) {
+                can_move_r_train[index] = true;
+                all_waiting = false;
+            }
+            else
+                can_move_r_train[index] = false;
+        }
+        index++;
+    }
+}
+
+// This function needs to be rewritten
+void canConfigure() {
+	can_configure = false;
+    index = 0;
+
+    while (index &lt; num_l_trains) {
+        if (l_sig_was_conf[index] == false)
+            can_configure = true;
+        if (lp_was_conf[index] == false)
+            can_configure = true;
+        index++;
+    }
+
+    index = 0;
+
+    while (index &lt; num_r_trains) {
+        if (r_sig_was_conf[index] == false)
+            can_configure = true;
+        if (rp_was_conf[index] == false)
+            can_configure = true;
+        index++;
+    }
+    index = 0;
+}
+
+// Change to set relevant signal only
+void lSetRelSignal(int id, int  st) {
+    bool go = false;
+
+    if (st)
+        go = true;
+
+    //Now check which signal is relevant
+    if (pos_l_trains[id] == 10)
+        signal[0] = go;
+    if (pos_l_trains[id] == 21)
+        signal[5] = go;
+    if (pos_l_trains[id] == 30)
+        signal[1] = go;
+    if (pos_l_trains[id] == 32)
+        signal[6] = go;
+    if (pos_l_trains[id] == 12)
+        signal[7] = go;
+
+    l_sig_was_conf[id] = true;
+}
+
+void rSetRelSignal(int id, int  st) {
+    bool go = false;
+
+    if (st)
+        go = true;
+
+    //Now check which signal is relevant
+    if (pos_r_trains[id] == 14)
+        signal[9] = go;
+    if (pos_r_trains[id] == 34)
+        signal[8] = go;
+    if (pos_r_trains[id] == 32)
+        signal[2] = go;
+    if (pos_r_trains[id] == 21)
+        signal[4] = go;
+    if (pos_r_trains[id] == 12)
+        signal[3] = go;
+
+    r_sig_was_conf[id] = true;
+}
+
+// Change to set relevant point only
+void rSetPointConf(int id, int st1, int st2, int st3) {
+	bool con1 = false;
+    bool con2 = false;
+    bool con3 = false;
+
+    if (st1)
+        con1 = true;
+    if (st2)
+        con2 = true;
+    if (st3)
+        con3 = true;
+
+    if (pos_r_trains[id] == 14) {
+        points[5] = con1;
+        points[3] = con2;
+    }
+    if (pos_r_trains[id] == 21) {
+        points[2] = con1;
+        points[1] = con2;
+        points[0] = con3;
+    }
+    if (pos_r_trains[id] == 12) {
+        points[0] = con1;
+    }
+    if (pos_r_trains[id] == 32) {
+        points[1] = con1;
+    }
+    if (pos_r_trains[id] == 34) {
+        points[4] = con1;
+        points[3] = con2;
+    }
+
+    rp_was_conf[id] = true;
+}
+
+void lSetPointConf(int id, int st1, int st2, int st3) {
+    bool con1 = false;
+    bool con2 = false;
+    bool con3 = false;
+
+    if (st1)
+        con1 = true;
+    if (st2)
+        con2 = true;
+    if (st3)
+        con3 = true;
+
+    if (pos_l_trains[id] == 10) {
+        points[2] = con1;
+        points[0] = con2;
+    }
+    if (pos_l_trains[id] == 21) {
+        points[5] = con1;
+        points[4] = con2;
+        points[3] = con3;
+    }
+    if (pos_l_trains[id] == 12) {
+        points[5] = con1;
+    }
+    if (pos_l_trains[id] == 32) {
+        points[4] = con1;
+    }
+    if (pos_l_trains[id] == 30) {
+        points[2] = con1;
+        points[1] = con2;
+    }
+
+    lp_was_conf[id] = true;
+}
+
+void resetConfigure() {
+	index = 0;
+    while(index &lt; num_l_trains) {
+        l_sig_was_conf[index] = false;
+        lp_was_conf[index] = false;
+        index++;
+    }
+
+    index = 0;
+
+    while(index &lt; num_r_trains) {
+        r_sig_was_conf[index] = false;
+        rp_was_conf[index] = false;
+        index++;
+    }
+    index = 0;
+}
+
+void moveL(int id, int section) {
+    bool dir = true;
+    pos_l_trains[id] = section;
+    checkIfCrash(id,section,dir);
+}
+
+void moveR(int id, int section) {
+    bool dir = false;
+}</declaration>
+	<template>
+		<name x="5" y="5">Controller</name>
+		<declaration>// Place local declarations here.
+</declaration>
+		<location id="id0" x="365" y="280">
+			<committed/>
+		</location>
+		<location id="id1" x="-204" y="331">
+			<name x="-255" y="323">Fail</name>
+		</location>
+		<location id="id2" x="59" y="238">
+			<name x="49" y="208">Win</name>
+		</location>
+		<location id="id3" x="-380" y="280">
+			<name x="-474" y="246">Wait_train</name>
+		</location>
+		<location id="id4" x="127" y="280">
+			<committed/>
+		</location>
+		<location id="id5" x="-110" y="280">
+			<committed/>
+		</location>
+		<location id="id6" x="-110" y="178">
+		</location>
+		<location id="id7" x="-110" y="442">
+			<committed/>
+		</location>
+		<init ref="id6"/>
+		<transition id="id8">
+			<source ref="id7"/>
+			<target ref="id0"/>
+			<label kind="select" x="-76" y="493">id : int[0, num_r_trains-1]</label>
+			<label kind="assignment" x="153" y="493">rSetRelSignal(id,1)</label>
+			<nail x="-110" y="518"/>
+			<nail x="459" y="518"/>
+			<nail x="391" y="289"/>
+		</transition>
+		<transition id="id9">
+			<source ref="id7"/>
+			<target ref="id0"/>
+			<label kind="select" x="-76" y="416">id : int[0,num_l_trains-1]</label>
+			<label kind="assignment" x="153" y="416">lSetRelSignal(id,1)</label>
+			<nail x="408" y="442"/>
+		</transition>
+		<transition id="id10">
+			<source ref="id5"/>
+			<target ref="id7"/>
+			<label kind="guard" x="-255" y="357">!can_configure
+&amp;&amp; all_waiting
+&amp;&amp; !win &amp;&amp; !crash</label>
+		</transition>
+		<transition id="id11">
+			<source ref="id4"/>
+			<target ref="id0"/>
+			<label kind="select" x="76" y="-110">id : int[0,num_l_trains-1],
+st1 : int[0,1],
+st2 : int[0,1],
+st3 : int[0,1]</label>
+			<label kind="guard" x="110" y="-17">!rp_was_conf[id] &amp;&amp; !success_r[id]</label>
+			<label kind="assignment" x="204" y="-51">rSetPointConf(id,st1,st2,st3)</label>
+			<nail x="110" y="263"/>
+			<nail x="8" y="-25"/>
+			<nail x="476" y="-25"/>
+			<nail x="391" y="263"/>
+		</transition>
+		<transition id="id12">
+			<source ref="id4"/>
+			<target ref="id0"/>
+			<label kind="select" x="76" y="25">id : int[0,num_l_trains-1],
+st1 : int[0,1],
+st2 : int[0,1],
+st3 : int[0,1]</label>
+			<label kind="guard" x="110" y="110">!lp_was_conf[id] &amp;&amp; !success_l[id]</label>
+			<label kind="assignment" x="195" y="85">lSetPointConf(id,st1,st2,st3)</label>
+			<nail x="85" y="110"/>
+			<nail x="399" y="110"/>
+		</transition>
+		<transition id="id13">
+			<source ref="id4"/>
+			<target ref="id0"/>
+			<label kind="select" x="144" y="128">id : int [0, num_l_trains-1],
+st : int[0,1]</label>
+			<label kind="guard" x="102" y="187">!r_sig_was_conf[id] &amp;&amp; !success_r[id]</label>
+			<label kind="assignment" x="144" y="170">rSetRelSignal(id,st)</label>
+			<nail x="127" y="255"/>
+			<nail x="144" y="213"/>
+			<nail x="348" y="213"/>
+		</transition>
+		<transition id="id14">
+			<source ref="id4"/>
+			<target ref="id0"/>
+			<label kind="select" x="127" y="297">id : int [0, num_l_trains-1],
+st : int[0,1]</label>
+			<label kind="guard" x="161" y="238">!l_sig_was_conf[id]
+&amp;&amp; !success_l[id]</label>
+			<label kind="assignment" x="127" y="331">lSetRelSignal(id,st)</label>
+			<nail x="272" y="280"/>
+			<nail x="331" y="280"/>
+		</transition>
+		<transition id="id15">
+			<source ref="id6"/>
+			<target ref="id5"/>
+			<label kind="guard" x="-153" y="204">ready</label>
+			<label kind="synchronisation" x="-136" y="221">go!</label>
+		</transition>
+		<transition id="id16">
+			<source ref="id0"/>
+			<target ref="id5"/>
+			<label kind="assignment" x="144" y="357">canGo(),
+canConfigure()</label>
+			<nail x="365" y="357"/>
+			<nail x="-68" y="357"/>
+			<nail x="-85" y="340"/>
+		</transition>
+		<transition id="id17">
+			<source ref="id5"/>
+			<target ref="id1"/>
+			<label kind="guard" x="-195" y="280">crash</label>
+		</transition>
+		<transition id="id18">
+			<source ref="id5"/>
+			<target ref="id2"/>
+			<label kind="guard" x="-76" y="212">win &amp;&amp; !crash</label>
+			<nail x="-76" y="238"/>
+		</transition>
+		<transition id="id19">
+			<source ref="id5"/>
+			<target ref="id3"/>
+			<label kind="guard" x="-416" y="161">!(crash || win || all_waiting)</label>
+			<label kind="synchronisation" x="-356" y="176">control_end!</label>
+			<label kind="assignment" x="-364" y="144">resetConfigure()</label>
+			<nail x="-260" y="200"/>
+			<nail x="-380" y="200"/>
+		</transition>
+		<transition id="id20">
+			<source ref="id3"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="-356" y="280">train_end?</label>
+			<label kind="assignment" x="-357" y="297">checkIfSuccess()</label>
+			<nail x="-356" y="280"/>
+		</transition>
+		<transition id="id21">
+			<source ref="id5"/>
+			<target ref="id4"/>
+			<label kind="guard" x="-85" y="289">can_configure
+&amp;&amp; !(win || crash)</label>
+		</transition>
+	</template>
+	<template>
+		<name>Driver</name>
+		<location id="id22" x="0" y="-32">
+			<committed/>
+		</location>
+		<location id="id23" x="-120" y="-32">
+			<name x="-112" y="-56">Init</name>
+		</location>
+		<init ref="id23"/>
+		<transition id="id24" controllable="false">
+			<source ref="id22"/>
+			<target ref="id23"/>
+			<label kind="guard" x="-107" y="-229">all_waiting</label>
+			<label kind="synchronisation" x="-102" y="-211">train_end!</label>
+			<nail x="76" y="-34"/>
+			<nail x="76" y="-187"/>
+			<nail x="-195" y="-187"/>
+			<nail x="-195" y="-34"/>
+		</transition>
+		<transition id="id25" controllable="false">
+			<source ref="id22"/>
+			<target ref="id23"/>
+			<label kind="select" x="-119" y="59">id : int[0,num_r_trains-1]</label>
+			<label kind="guard" x="-120" y="24">can_move_r_train[id]</label>
+			<label kind="synchronisation" x="-120" y="40">move_r_train[id]!</label>
+			<nail x="0" y="24"/>
+			<nail x="-120" y="24"/>
+		</transition>
+		<transition id="id26" controllable="false">
+			<source ref="id22"/>
+			<target ref="id23"/>
+			<label kind="select" x="-153" y="-144">id : int[0, num_l_trains-1]</label>
+			<label kind="guard" x="-136" y="-110">can_move_l_train[id]</label>
+			<label kind="synchronisation" x="-119" y="-127">move_l_train[id]!</label>
+			<nail x="0" y="-88"/>
+			<nail x="-120" y="-88"/>
+		</transition>
+		<transition id="id27" controllable="false">
+			<source ref="id23"/>
+			<target ref="id22"/>
+			<label kind="synchronisation" x="-110" y="-25">control_end?</label>
+			<label kind="assignment" x="-68" y="-59">canGo()</label>
+		</transition>
+	</template>
+	<template>
+		<name>Train_L</name>
+		<parameter>l_train_id id</parameter>
+		<declaration>clock x;</declaration>
+		<location id="id28" x="-1512" y="-475">
+			<name x="-1546" y="-509">Init</name>
+			<urgent/>
+		</location>
+		<location id="id29" x="-1316" y="-670">
+			<name x="-1326" y="-704">s30</name>
+		</location>
+		<location id="id30" x="-1317" y="-263">
+			<name x="-1327" y="-297">s10</name>
+		</location>
+		<location id="id31" x="-1164" y="-671">
+			<name x="-1174" y="-705">s31</name>
+			<committed/>
+		</location>
+		<location id="id32" x="-1164" y="-569">
+			<name x="-1147" y="-594">s31_long</name>
+			<label kind="invariant" x="-1224" y="-578">x&lt;=15</label>
+		</location>
+		<location id="id33" x="-968" y="-671">
+			<name x="-1002" y="-713">s31_short</name>
+			<label kind="invariant" x="-985" y="-654">x&lt;=5</label>
+		</location>
+		<location id="id34" x="-756" y="-671">
+			<name x="-766" y="-705">s32</name>
+			<label kind="invariant" x="-773" y="-654">x&lt;=20</label>
+		</location>
+		<location id="id35" x="-509" y="-671">
+			<name x="-535" y="-705">s32_end</name>
+		</location>
+		<location id="id36" x="-289" y="-671">
+			<name x="-323" y="-705">s33_short</name>
+			<label kind="invariant" x="-340" y="-663">x&lt;=5</label>
+		</location>
+		<location id="id37" x="-50" y="-671">
+			<name x="-60" y="-705">s34</name>
+		</location>
+		<location id="id38" x="-1053" y="-492">
+			<name x="-1063" y="-526">s20p</name>
+			<label kind="invariant" x="-1037" y="-484">x&lt;=5</label>
+		</location>
+		<location id="id39" x="-900" y="-492">
+			<name x="-934" y="-526">s20_short</name>
+			<label kind="invariant" x="-910" y="-475">x&lt;=5</label>
+		</location>
+		<location id="id40" x="-756" y="-492">
+			<name x="-766" y="-526">s21</name>
+			<label kind="invariant" x="-766" y="-475">x&lt;=5</label>
+		</location>
+		<location id="id41" x="-611" y="-492">
+			<name x="-663" y="-527">s21_end</name>
+		</location>
+		<location id="id42" x="-484" y="-416">
+			<name x="-509" y="-450">s22_short</name>
+			<label kind="invariant" x="-552" y="-425">x&lt;=5</label>
+		</location>
+		<location id="id43" x="-467" y="-578">
+			<name x="-477" y="-612">s22_long</name>
+			<label kind="invariant" x="-484" y="-570">x&lt;=15</label>
+		</location>
+		<location id="id44" x="-306" y="-578">
+			<name x="-316" y="-612">s22m</name>
+			<label kind="invariant" x="-323" y="-569">x&lt;=5</label>
+		</location>
+		<location id="id45" x="-110" y="-578">
+			<name x="-187" y="-578">s33_long</name>
+			<label kind="invariant" x="-127" y="-561">x&lt;=15</label>
+		</location>
+		<location id="id46" x="-212" y="-416">
+			<name x="-229" y="-450">s22p</name>
+			<label kind="invariant" x="-238" y="-399">x&lt;=5</label>
+		</location>
+		<location id="id47" x="-1036" y="-263">
+			<name x="-1070" y="-297">s11_short</name>
+			<label kind="invariant" x="-1054" y="-246">x&lt;=5</label>
+		</location>
+		<location id="id48" x="-1189" y="-373">
+			<name x="-1198" y="-407">s11_long</name>
+			<label kind="invariant" x="-1190" y="-357">x&lt;=15</label>
+		</location>
+		<location id="id49" x="-1045" y="-374">
+			<name x="-1062" y="-408">s20m</name>
+			<label kind="invariant" x="-1062" y="-357">x&lt;=5</label>
+		</location>
+		<location id="id50" x="-900" y="-373">
+			<name x="-951" y="-407">s20_long</name>
+			<label kind="invariant" x="-926" y="-425">x&lt;=15</label>
+		</location>
+		<location id="id51" x="-756" y="-263">
+			<name x="-766" y="-297">s12</name>
+			<label kind="invariant" x="-765" y="-246">x&lt;=20</label>
+		</location>
+		<location id="id52" x="-544" y="-263">
+			<name x="-561" y="-297">s12_end</name>
+		</location>
+		<location id="id53" x="-254" y="-263">
+			<name x="-289" y="-297">s13_short</name>
+			<label kind="invariant" x="-263" y="-246">x&lt;=5</label>
+		</location>
+		<location id="id54" x="-93" y="-340">
+			<name x="-93" y="-374">s13_long</name>
+			<label kind="invariant" x="-161" y="-340">x&lt;=15</label>
+		</location>
+		<location id="id55" x="42" y="-263">
+			<name x="32" y="-297">s14</name>
+		</location>
+		<init ref="id28"/>
+		<transition id="id56" controllable="false">
+			<source ref="id54"/>
+			<target ref="id55"/>
+			<label kind="synchronisation" x="-34" y="-331">train_end!</label>
+			<label kind="assignment" x="-8" y="-391">moveL(id,14),
+can_move_l_train[id]:=false,
+x:=0</label>
+		</transition>
+		<transition id="id57" controllable="false">
+			<source ref="id53"/>
+			<target ref="id55"/>
+			<label kind="guard" x="-161" y="-289">x &gt; 3</label>
+			<label kind="synchronisation" x="-102" y="-289">train_end!</label>
+			<label kind="assignment" x="-178" y="-255">moveL(id,14),
+can_move_l_train[id]:=false,
+x:=0</label>
+		</transition>
+		<transition id="id58" controllable="false">
+			<source ref="id46"/>
+			<target ref="id54"/>
+			<label kind="guard" x="-102" y="-399">x &gt; 3</label>
+			<label kind="assignment" x="-153" y="-425">moveL(id,13),
+x:=0</label>
+		</transition>
+		<transition id="id59" controllable="false">
+			<source ref="id52"/>
+			<target ref="id53"/>
+			<label kind="guard" x="-476" y="-306">signal[7]</label>
+			<label kind="synchronisation" x="-476" y="-289">move_l_train[id]?</label>
+			<label kind="assignment" x="-476" y="-255">moveL(id,13),
+x:=0</label>
+		</transition>
+		<transition id="id60" controllable="false">
+			<source ref="id51"/>
+			<target ref="id52"/>
+			<label kind="guard" x="-680" y="-289">x &gt; 15</label>
+			<label kind="synchronisation" x="-688" y="-306">train_end!</label>
+			<label kind="assignment" x="-680" y="-263">x:=0</label>
+		</transition>
+		<transition id="id61" controllable="false">
+			<source ref="id47"/>
+			<target ref="id51"/>
+			<label kind="guard" x="-909" y="-289">x &gt; 3</label>
+			<label kind="assignment" x="-935" y="-255">moveL(id,12),
+x:=0</label>
+		</transition>
+		<transition id="id62" controllable="false">
+			<source ref="id50"/>
+			<target ref="id40"/>
+			<label kind="guard" x="-807" y="-442">x &gt; 10</label>
+			<label kind="assignment" x="-824" y="-425">moveL(id,21),
+x:=0</label>
+		</transition>
+		<transition id="id63" controllable="false">
+			<source ref="id49"/>
+			<target ref="id50"/>
+			<label kind="guard" x="-1003" y="-399">x &gt; 3</label>
+			<label kind="assignment" x="-1011" y="-357">moveL(id,20),
+x:=0</label>
+		</transition>
+		<transition id="id64" controllable="false">
+			<source ref="id48"/>
+			<target ref="id49"/>
+			<label kind="guard" x="-1130" y="-399">x &gt; 10</label>
+			<label kind="assignment" x="-1173" y="-442">moveL(id,200),
+x:=0</label>
+		</transition>
+		<transition id="id65" controllable="false">
+			<source ref="id30"/>
+			<target ref="id48"/>
+			<label kind="guard" x="-1385" y="-382">signal[0] &amp;&amp; points[0]</label>
+			<label kind="synchronisation" x="-1385" y="-365">move_l_train[id]?</label>
+			<label kind="assignment" x="-1385" y="-348">moveL(id,11),
+x:=0</label>
+			<nail x="-1300" y="-271"/>
+		</transition>
+		<transition id="id66" controllable="false">
+			<source ref="id30"/>
+			<target ref="id47"/>
+			<label kind="guard" x="-1266" y="-297">signal[0] &amp;&amp; !points[0]</label>
+			<label kind="synchronisation" x="-1240" y="-314">move_l_train[id]?</label>
+			<label kind="assignment" x="-1215" y="-255">moveL(id,11),
+x:=0</label>
+		</transition>
+		<transition id="id67" controllable="false">
+			<source ref="id28"/>
+			<target ref="id30"/>
+			<label kind="guard" x="-1445" y="-289">id == 0</label>
+			<label kind="assignment" x="-1479" y="-255">l_init[id]:=true,
+checkIfTrainsReady()</label>
+			<nail x="-1513" y="-263"/>
+		</transition>
+		<transition id="id68" controllable="false">
+			<source ref="id28"/>
+			<target ref="id29"/>
+			<label kind="guard" x="-1462" y="-697">id == 1</label>
+			<label kind="assignment" x="-1487" y="-663">l_init[id]:=true,
+checkIfTrainsReady()</label>
+			<nail x="-1513" y="-671"/>
+		</transition>
+		<transition id="id69" controllable="false">
+			<source ref="id42"/>
+			<target ref="id46"/>
+			<label kind="guard" x="-323" y="-442">x &gt; 3</label>
+			<label kind="assignment" x="-374" y="-467">moveL(id,221),
+x:=0</label>
+		</transition>
+		<transition id="id70" controllable="false">
+			<source ref="id45"/>
+			<target ref="id37"/>
+			<label kind="guard" x="-59" y="-612">x &gt; 10</label>
+			<label kind="synchronisation" x="-59" y="-629">train_end!</label>
+			<label kind="assignment" x="-68" y="-595">moveL(id,34),
+can_move_l_train[id]:=false,
+x:=0</label>
+			<nail x="-93" y="-577"/>
+		</transition>
+		<transition id="id71" controllable="false">
+			<source ref="id44"/>
+			<target ref="id45"/>
+			<label kind="guard" x="-221" y="-603">x &gt; 3</label>
+			<label kind="assignment" x="-263" y="-629">moveL(id,33),
+x:=0</label>
+		</transition>
+		<transition id="id72" controllable="false">
+			<source ref="id43"/>
+			<target ref="id44"/>
+			<label kind="guard" x="-408" y="-603">x &gt; 10</label>
+			<label kind="assignment" x="-433" y="-569">moveL(id,220),
+x:=0</label>
+		</transition>
+		<transition id="id73" controllable="false">
+			<source ref="id41"/>
+			<target ref="id43"/>
+			<label kind="guard" x="-586" y="-629">points[3]</label>
+			<label kind="synchronisation" x="-620" y="-612">move_l_train[id]?</label>
+			<label kind="assignment" x="-569" y="-552">moveL(id,22),
+x:=0</label>
+			<nail x="-560" y="-577"/>
+		</transition>
+		<transition id="id74" controllable="false">
+			<source ref="id41"/>
+			<target ref="id42"/>
+			<label kind="guard" x="-552" y="-484">!points[3]</label>
+			<label kind="synchronisation" x="-535" y="-467">move_l_train[id]?</label>
+			<label kind="assignment" x="-646" y="-450">moveL(id,22),
+x:=0</label>
+		</transition>
+		<transition id="id75" controllable="false">
+			<source ref="id40"/>
+			<target ref="id41"/>
+			<label kind="guard" x="-705" y="-518">x &gt; 3</label>
+			<label kind="synchronisation" x="-722" y="-484">train_end!</label>
+		</transition>
+		<transition id="id76" controllable="false">
+			<source ref="id39"/>
+			<target ref="id40"/>
+			<label kind="guard" x="-850" y="-518">x &gt; 3</label>
+			<label kind="assignment" x="-850" y="-552">moveL(id,21),
+x:=0</label>
+		</transition>
+		<transition id="id77" controllable="false">
+			<source ref="id38"/>
+			<target ref="id39"/>
+			<label kind="guard" x="-1003" y="-518">x &gt; 3</label>
+			<label kind="assignment" x="-1020" y="-561">moveL(id,20),
+x:=0</label>
+		</transition>
+		<transition id="id78" controllable="false">
+			<source ref="id33"/>
+			<target ref="id34"/>
+			<label kind="guard" x="-901" y="-697">x &gt; 3</label>
+			<label kind="assignment" x="-901" y="-731">moveL(id,32),
+x:=0</label>
+		</transition>
+		<transition id="id79" controllable="false">
+			<source ref="id32"/>
+			<target ref="id38"/>
+			<label kind="guard" x="-1113" y="-561">x &gt; 10</label>
+			<label kind="assignment" x="-1207" y="-527">moveL(id,201),
+x:=0</label>
+		</transition>
+		<transition id="id80" controllable="false">
+			<source ref="id36"/>
+			<target ref="id37"/>
+			<label kind="guard" x="-187" y="-697">x &gt; 3</label>
+			<label kind="synchronisation" x="-204" y="-671">train_end!</label>
+			<label kind="assignment" x="-229" y="-748">moveL(id,34),
+can_move_l_train[id]:=false,
+x:=0</label>
+		</transition>
+		<transition id="id81" controllable="false">
+			<source ref="id35"/>
+			<target ref="id36"/>
+			<label kind="guard" x="-442" y="-697">signal[6]</label>
+			<label kind="synchronisation" x="-467" y="-722">move_l_train[id]?</label>
+			<label kind="assignment" x="-459" y="-756">moveL(id,33),
+x:=0</label>
+		</transition>
+		<transition id="id82" controllable="false">
+			<source ref="id34"/>
+			<target ref="id35"/>
+			<label kind="guard" x="-688" y="-663">x &gt; 15</label>
+			<label kind="synchronisation" x="-671" y="-697">train_end!</label>
+			<label kind="assignment" x="-620" y="-663">x:=0</label>
+		</transition>
+		<transition id="id83" controllable="false">
+			<source ref="id31"/>
+			<target ref="id32"/>
+			<label kind="guard" x="-1155" y="-645">points[1]</label>
+			<label kind="assignment" x="-1155" y="-628">x:=0</label>
+		</transition>
+		<transition id="id84" controllable="false">
+			<source ref="id31"/>
+			<target ref="id33"/>
+			<label kind="guard" x="-1104" y="-696">!points[1]</label>
+			<label kind="assignment" x="-1087" y="-671">x:=0</label>
+		</transition>
+		<transition id="id85" controllable="false">
+			<source ref="id29"/>
+			<target ref="id31"/>
+			<label kind="guard" x="-1292" y="-748">signal[1]</label>
+			<label kind="synchronisation" x="-1292" y="-731">move_l_train[id]?</label>
+			<label kind="assignment" x="-1292" y="-714">moveL(id,31)</label>
+		</transition>
+	</template>
+	<template>
+		<name>Train_R</name>
+		<parameter>r_train_id id</parameter>
+		<declaration>clock x;
+bool R = false;</declaration>
+		<location id="id86" x="-713" y="1">
+			<name x="-723" y="-33">s30</name>
+		</location>
+		<location id="id87" x="-714" y="408">
+			<name x="-724" y="374">s10</name>
+		</location>
+		<location id="id88" x="-561" y="102">
+			<name x="-544" y="77">s31_long</name>
+			<label kind="invariant" x="-586" y="136">x&lt;=15</label>
+		</location>
+		<location id="id89" x="-450" y="0">
+			<name x="-460" y="-34">s31_short</name>
+			<label kind="invariant" x="-460" y="17">x&lt;=5</label>
+		</location>
+		<location id="id90" x="-153" y="0">
+			<name x="-163" y="-34">s32_end</name>
+		</location>
+		<location id="id91" x="51" y="0">
+			<name x="25" y="-34">s32</name>
+			<label kind="invariant" x="41" y="17">x&lt;=20</label>
+		</location>
+		<location id="id92" x="264" y="0">
+			<name x="230" y="-34">s33_short</name>
+			<label kind="invariant" x="254" y="17">x&lt;=5</label>
+		</location>
+		<location id="id93" x="790" y="-1">
+			<name x="780" y="-35">s34</name>
+		</location>
+		<location id="id94" x="-450" y="179">
+			<name x="-460" y="145">s20p</name>
+			<label kind="invariant" x="-460" y="196">x&lt;=5</label>
+		</location>
+		<location id="id95" x="-297" y="179">
+			<name x="-331" y="145">s20_short</name>
+			<label kind="invariant" x="-307" y="196">x&lt;=5</label>
+		</location>
+		<location id="id96" x="-153" y="179">
+			<name x="-163" y="145">s21_end</name>
+		</location>
+		<location id="id97" x="-8" y="179">
+			<name x="-51" y="145">s21</name>
+			<label kind="invariant" x="-18" y="196">x&lt;=5</label>
+		</location>
+		<location id="id98" x="136" y="179">
+			<name x="93" y="144">s22_short</name>
+			<label kind="invariant" x="127" y="195">x&lt;=5</label>
+		</location>
+		<location id="id99" x="136" y="102">
+			<name x="119" y="68">s22_long</name>
+			<label kind="invariant" x="119" y="118">x&lt;=15</label>
+		</location>
+		<location id="id100" x="289" y="102">
+			<name x="279" y="68">s22m</name>
+			<label kind="invariant" x="279" y="119">x&lt;=5</label>
+		</location>
+		<location id="id101" x="527" y="102">
+			<name x="552" y="93">s33_long</name>
+			<label kind="invariant" x="518" y="127">x&lt;=15</label>
+		</location>
+		<location id="id102" x="264" y="179">
+			<name x="247" y="145">s22p</name>
+			<label kind="invariant" x="254" y="196">x&lt;=5</label>
+		</location>
+		<location id="id103" x="-450" y="408">
+			<name x="-484" y="374">s11_short</name>
+			<label kind="invariant" x="-460" y="425">x&lt;=5</label>
+		</location>
+		<location id="id104" x="-586" y="298">
+			<name x="-612" y="264">s11_long</name>
+			<label kind="invariant" x="-596" y="315">x&lt;=15</label>
+		</location>
+		<location id="id105" x="-450" y="298">
+			<name x="-467" y="264">s20m</name>
+			<label kind="invariant" x="-460" y="315">x&lt;=5</label>
+		</location>
+		<location id="id106" x="-280" y="297">
+			<name x="-331" y="263">s20_long</name>
+			<label kind="invariant" x="-290" y="314">x&lt;=15</label>
+		</location>
+		<location id="id107" x="-280" y="408">
+			<name x="-290" y="374">s12_end</name>
+		</location>
+		<location id="id108" x="0" y="408">
+			<name x="-17" y="374">s12</name>
+			<label kind="invariant" x="-10" y="425">x&lt;=20</label>
+		</location>
+		<location id="id109" x="272" y="408">
+			<name x="262" y="374">s13_short</name>
+			<label kind="invariant" x="262" y="425">x&lt;=5</label>
+		</location>
+		<location id="id110" x="535" y="229">
+			<name x="535" y="195">s13_long</name>
+			<label kind="invariant" x="561" y="229">x&lt;=15</label>
+		</location>
+		<location id="id111" x="790" y="407">
+			<name x="807" y="399">s14</name>
+		</location>
+		<location id="id112" x="790" y="212">
+			<name x="780" y="178">Init</name>
+		</location>
+		<location id="id113" x="527" y="0">
+			<name x="517" y="-34">s33</name>
+			<committed/>
+		</location>
+		<location id="id114" x="535" y="408">
+			<name x="525" y="374">s13</name>
+			<committed/>
+		</location>
+		<init ref="id112"/>
+		<transition id="id115" controllable="false">
+			<source ref="id89"/>
+			<target ref="id86"/>
+			<label kind="guard" x="-612" y="-34">x&gt;3</label>
+			<label kind="synchronisation" x="-695" y="-17">train_end!</label>
+		</transition>
+		<transition id="id116" controllable="false">
+			<source ref="id88"/>
+			<target ref="id86"/>
+			<label kind="guard" x="-671" y="59">x&gt;10</label>
+			<label kind="synchronisation" x="-629" y="34">train_end!</label>
+		</transition>
+		<transition id="id117" controllable="false">
+			<source ref="id114"/>
+			<target ref="id109"/>
+			<label kind="guard" x="374" y="382">!points[5]</label>
+		</transition>
+		<transition id="id118" controllable="false">
+			<source ref="id114"/>
+			<target ref="id110"/>
+			<label kind="guard" x="569" y="280">points[5]</label>
+			<label kind="assignment" x="561" y="340">x:=0</label>
+		</transition>
+		<transition id="id119" controllable="false">
+			<source ref="id111"/>
+			<target ref="id114"/>
+			<label kind="guard" x="637" y="382">signal[9]</label>
+			<label kind="synchronisation" x="629" y="476">move_r_train[id]?</label>
+			<label kind="assignment" x="586" y="416">pos_r_trains[id]:=13,
+checkIfCrash(id,13,R),
+x:=0</label>
+		</transition>
+		<transition id="id120" controllable="false">
+			<source ref="id93"/>
+			<target ref="id113"/>
+			<label kind="guard" x="603" y="-119">signal[8]</label>
+			<label kind="synchronisation" x="561" y="-102">move_r_train[id]?</label>
+			<label kind="assignment" x="569" y="-76">pos_r_trains[id]:=33,
+checkIfCrash(id,33,R),
+x:=0</label>
+		</transition>
+		<transition id="id121" controllable="false">
+			<source ref="id113"/>
+			<target ref="id92"/>
+			<label kind="guard" x="365" y="-34">points[4]</label>
+		</transition>
+		<transition id="id122" controllable="false">
+			<source ref="id113"/>
+			<target ref="id101"/>
+			<label kind="guard" x="535" y="34">!points[4]</label>
+			<label kind="assignment" x="544" y="51">x:=0</label>
+		</transition>
+		<transition id="id123" controllable="false">
+			<source ref="id112"/>
+			<target ref="id111"/>
+			<label kind="guard" x="816" y="348">id == 0</label>
+			<label kind="assignment" x="816" y="273">r_init[id]:=true,
+checkIfTrainsReady()</label>
+			<nail x="790" y="391"/>
+		</transition>
+		<transition id="id124" controllable="false">
+			<source ref="id112"/>
+			<target ref="id93"/>
+			<label kind="guard" x="799" y="33">id == 1</label>
+			<label kind="assignment" x="807" y="59">r_init[id]:=true,
+checkIfTrainsReady()</label>
+			<nail x="790" y="0"/>
+		</transition>
+		<transition id="id125" controllable="false">
+			<source ref="id103"/>
+			<target ref="id87"/>
+			<label kind="guard" x="-578" y="382">x&gt;3</label>
+			<label kind="synchronisation" x="-654" y="416">train_end!</label>
+		</transition>
+		<transition id="id126" controllable="false">
+			<source ref="id107"/>
+			<target ref="id103"/>
+			<label kind="guard" x="-374" y="382">signal[3]</label>
+			<label kind="synchronisation" x="-416" y="433">move_r_train[id]?</label>
+			<label kind="assignment" x="-442" y="459">pos_r_trains[id]:=11,
+checkIfCrash(id,11,R),
+x:=0</label>
+		</transition>
+		<transition id="id127" controllable="false">
+			<source ref="id108"/>
+			<target ref="id107"/>
+			<label kind="guard" x="-144" y="425">x&gt;15</label>
+			<label kind="synchronisation" x="-187" y="374">train_end!</label>
+		</transition>
+		<transition id="id128" controllable="false">
+			<source ref="id109"/>
+			<target ref="id108"/>
+			<label kind="guard" x="136" y="382">x&gt;3</label>
+			<label kind="assignment" x="75" y="416">pos_r_trains[id]:=12,
+checkIfCrash(id,12,R),
+x:=0</label>
+		</transition>
+		<transition id="id129" controllable="false">
+			<source ref="id110"/>
+			<target ref="id102"/>
+			<label kind="guard" x="416" y="178">x&gt;10</label>
+			<label kind="assignment" x="323" y="221">pos_r_trains[id]:=22,
+checkIfCrash(id,22,R),
+x:=0</label>
+		</transition>
+		<transition id="id130" controllable="false">
+			<source ref="id102"/>
+			<target ref="id98"/>
+			<label kind="guard" x="187" y="153">x&gt;3</label>
+			<label kind="assignment" x="195" y="187">x:=0</label>
+		</transition>
+		<transition id="id131" controllable="false">
+			<source ref="id98"/>
+			<target ref="id97"/>
+			<label kind="guard" x="51" y="161">x&gt;3</label>
+			<label kind="assignment" x="-8" y="212">pos_r_trains[id]:=21,
+checkIfCrash(id,21,R),
+x:=0</label>
+		</transition>
+		<transition id="id132" controllable="false">
+			<source ref="id104"/>
+			<target ref="id87"/>
+			<label kind="guard" x="-799" y="365">x&gt;10</label>
+			<label kind="synchronisation" x="-765" y="289">train_end!</label>
+			<label kind="assignment" x="-841" y="314">pos_r_trains[id]:=10,
+checkIfCrash(id,10,R),
+x:=0</label>
+		</transition>
+		<transition id="id133" controllable="false">
+			<source ref="id105"/>
+			<target ref="id104"/>
+			<label kind="guard" x="-527" y="272">x&gt;3</label>
+			<label kind="assignment" x="-595" y="204">pos_r_trains[id]:=11,
+checkIfCrash(id,11,R),
+x:=0</label>
+		</transition>
+		<transition id="id134" controllable="false">
+			<source ref="id106"/>
+			<target ref="id105"/>
+		</transition>
+		<transition id="id135" controllable="false">
+			<source ref="id96"/>
+			<target ref="id106"/>
+			<label kind="guard" x="-204" y="297">signal[4] &amp;&amp; points[2]</label>
+			<label kind="synchronisation" x="-229" y="280">move_r_train[id]?</label>
+			<label kind="assignment" x="-212" y="229">pos_r_trains[id]:=20,
+checkIfCrash(id,20,R),
+x:=0</label>
+		</transition>
+		<transition id="id136" controllable="false">
+			<source ref="id94"/>
+			<target ref="id88"/>
+			<label kind="guard" x="-527" y="136">x&gt;3</label>
+			<label kind="assignment" x="-501" y="76">pos_r_trains[id]:=31,
+checkIfCrash(id,31,R),
+x:=0</label>
+		</transition>
+		<transition id="id137" controllable="false">
+			<source ref="id95"/>
+			<target ref="id94"/>
+			<label kind="guard" x="-416" y="187">x&gt;3</label>
+			<label kind="assignment" x="-374" y="187">x:=0</label>
+		</transition>
+		<transition id="id138" controllable="false">
+			<source ref="id96"/>
+			<target ref="id95"/>
+			<label kind="guard" x="-280" y="119">signal[4] &amp;&amp; !points[2]</label>
+			<label kind="synchronisation" x="-297" y="93">move_r_train[id]?</label>
+			<label kind="assignment" x="-322" y="42">pos_r_trains[id]:=20,
+checkIfCrash(id,20,R),
+x:=0</label>
+		</transition>
+		<transition id="id139" controllable="false">
+			<source ref="id97"/>
+			<target ref="id96"/>
+			<label kind="guard" x="-93" y="153">x&gt;3</label>
+			<label kind="synchronisation" x="-119" y="178">train_end!</label>
+			<label kind="assignment" x="-102" y="195">x:=0</label>
+		</transition>
+		<transition id="id140" controllable="false">
+			<source ref="id99"/>
+			<target ref="id97"/>
+			<label kind="guard" x="-25" y="93">x&gt;10</label>
+			<label kind="assignment" x="-85" y="59">pos_r_trains[id]:=21,
+checkIfCrash(id,21,R),
+x:=0</label>
+			<nail x="33" y="102"/>
+		</transition>
+		<transition id="id141" controllable="false">
+			<source ref="id100"/>
+			<target ref="id99"/>
+			<label kind="guard" x="204" y="76">x&gt;3</label>
+			<label kind="assignment" x="154" y="102">x:=0</label>
+		</transition>
+		<transition id="id142" controllable="false">
+			<source ref="id101"/>
+			<target ref="id100"/>
+			<label kind="guard" x="382" y="68">x&gt;10</label>
+			<label kind="assignment" x="331" y="102">pos_r_trains[id]:=22,
+checkIfCrash(id,22,R),
+x:=0</label>
+		</transition>
+		<transition id="id143" controllable="false">
+			<source ref="id90"/>
+			<target ref="id89"/>
+			<label kind="guard" x="-331" y="8">signal[2]</label>
+			<label kind="synchronisation" x="-348" y="-25">move_r_train[id]?</label>
+			<label kind="assignment" x="-348" y="-93">pos_r_trains[id]:=31,
+checkIfCrash(id,31,R),
+x:=0</label>
+		</transition>
+		<transition id="id144" controllable="false">
+			<source ref="id91"/>
+			<target ref="id90"/>
+			<label kind="guard" x="-42" y="0">x&gt;15</label>
+			<label kind="synchronisation" x="-93" y="-25">train_end!</label>
+			<label kind="assignment" x="-135" y="0">x:=0</label>
+		</transition>
+		<transition id="id145" controllable="false">
+			<source ref="id92"/>
+			<target ref="id91"/>
+			<label kind="guard" x="144" y="-34">x&gt;3</label>
+			<label kind="assignment" x="76" y="-76">pos_r_trains[id]:=32,
+checkIfCrash(id,32,R),
+x:=0</label>
+		</transition>
+	</template>
+	<system>// Place template instantiations here.
+
+// List one or more processes to be composed into a system.
+system Controller, Driver, Train_L, Train_R;</system>
+	<queries>
+		<query>
+			<formula>control: A[] not(Controller.Fail)</formula>
+			<comment/>
+			<option key="--diagnostic" value="1"/>
+			<result outcome="success" type="quality" timestamp="2023-05-20 19:39:10 +0200">
+				<option key="--diagnostic" value="1"/>
+			</result>
+		</query>
+		<query>
+			<formula>control: A[not(Controller.Fail) W Controller.Win]</formula>
+			<comment/>
+			<result outcome="success" type="quality" timestamp="2023-05-20 19:19:35 +0200">
+				<option key="--hashtable-size" value="31"/>
+				<option key="--generate-strategy" value="1"/>
+				<option key="--diagnostic" value="1"/>
+			</result>
+		</query>
+		<query>
+			<formula>control: A[not(Controller.Fail) U Controller.Win]</formula>
+			<comment/>
+			<result outcome="failure" type="quality" timestamp="2023-05-20 19:09:34 +0200">
+				<option key="--hashtable-size" value="31"/>
+				<option key="--generate-strategy" value="1"/>
+				<option key="--diagnostic" value="1"/>
+			</result>
+		</query>
+		<query>
+			<formula>control: A&lt;&gt; Controller.Win</formula>
+			<comment/>
+			<result outcome="failure" type="quality" timestamp="2023-05-20 19:19:18 +0200">
+				<option key="--hashtable-size" value="31"/>
+				<option key="--generate-strategy" value="1"/>
+				<option key="--diagnostic" value="1"/>
+			</result>
+		</query>
+		<query>
+			<formula>E&lt;&gt; control: A&lt;&gt; Controller.Win</formula>
+			<comment/>
+			<option key="--hashtable-size" value="31"/>
+			<option key="--generate-strategy" value="1"/>
+			<option key="--diagnostic" value="1"/>
+			<result outcome="success" type="quality" timestamp="2023-05-20 19:25:28 +0200">
+				<option key="--hashtable-size" value="31"/>
+				<option key="--generate-strategy" value="1"/>
+				<option key="--diagnostic" value="1"/>
+			</result>
+		</query>
+	</queries>
+</nta>
